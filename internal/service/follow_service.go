@@ -9,11 +9,14 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/segmentio/kafka-go"
 	"github.com/snaply/relation-service/internal/repository"
 	"go.uber.org/zap"
 )
 
 var ErrCannotFollowSelf = errors.New("cannot follow yourself")
+
+const topicUserFollowed = "user.followed"
 
 type Page struct {
 	UserIDs    []uuid.UUID
@@ -36,11 +39,12 @@ type FollowService interface {
 
 type followService struct {
 	follows repository.FollowRepository
+	kafka   *kafka.Writer
 	log     *zap.Logger
 }
 
-func NewFollowService(follows repository.FollowRepository, log *zap.Logger) FollowService {
-	return &followService{follows: follows, log: log}
+func NewFollowService(follows repository.FollowRepository, kafkaWriter *kafka.Writer, log *zap.Logger) FollowService {
+	return &followService{follows: follows, kafka: kafkaWriter, log: log}
 }
 
 func (s *followService) Follow(ctx context.Context, followerID, followeeID uuid.UUID) error {
@@ -50,7 +54,34 @@ func (s *followService) Follow(ctx context.Context, followerID, followeeID uuid.
 	if err := s.follows.Create(ctx, followerID, followeeID); err != nil {
 		return fmt.Errorf("creating follow: %w", err)
 	}
+
+	// Publish async — a slow Kafka broker must never delay the follow request itself.
+	go s.publishFollowed(followerID, followeeID)
+
 	return nil
+}
+
+func (s *followService) publishFollowed(followerID, followeeID uuid.UUID) {
+	if s.kafka == nil {
+		return
+	}
+	event := map[string]any{
+		"follower_id": followerID,
+		"followed_id": followeeID,
+		"timestamp":   time.Now().UTC(),
+	}
+	data, err := json.Marshal(event)
+	if err != nil {
+		s.log.Warn("failed to marshal user.followed event", zap.Error(err))
+		return
+	}
+	if err := s.kafka.WriteMessages(context.Background(), kafka.Message{
+		Topic: topicUserFollowed,
+		Key:   []byte(followerID.String() + ":" + followeeID.String()),
+		Value: data,
+	}); err != nil {
+		s.log.Warn("failed to publish user.followed event", zap.Error(err))
+	}
 }
 
 func (s *followService) Unfollow(ctx context.Context, followerID, followeeID uuid.UUID) error {

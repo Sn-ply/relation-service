@@ -7,6 +7,7 @@ Follow graph for Snaply — who follows whom. Trusts the `X-User-ID` header set 
 | Variable       | Default                                                                       | Description                    |
 |----------------|---------------------------------------------------------------------------------|---------------------------------|
 | `DATABASE_URL` | `postgres://snaply:snaply_secret@localhost:5432/relations?sslmode=disable`    | PostgreSQL connection string    |
+| `KAFKA_BROKERS`| `localhost:29092`                                                             | Comma-separated Kafka broker list |
 | `SERVER_PORT`  | `8083`                                                                        | HTTP listen port                |
 
 ## Endpoints
@@ -23,6 +24,8 @@ Follow graph for Snaply — who follows whom. Trusts the `X-User-ID` header set 
 
 Followers/following/counts return raw user IDs only — resolving them to usernames/avatars is done
 by calling `user-service`'s `POST /api/v1/users/batch`.
+
+Publishes `user.followed` to Kafka on a successful follow (consumed by `notification-service`).
 
 ## Running Locally
 

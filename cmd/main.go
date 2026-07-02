@@ -12,6 +12,7 @@ import (
 
 	_ "github.com/jackc/pgx/v5/stdlib"
 	"github.com/jmoiron/sqlx"
+	"github.com/segmentio/kafka-go"
 	"github.com/snaply/relation-service/internal/config"
 	"github.com/snaply/relation-service/internal/handler"
 	pgRepo "github.com/snaply/relation-service/internal/repository/postgres"
@@ -41,8 +42,15 @@ func main() {
 	}
 	log.Info("connected to postgres")
 
+	kafkaWriter := &kafka.Writer{
+		Addr:         kafka.TCP(cfg.Kafka.Brokers...),
+		Balancer:     &kafka.LeastBytes{},
+		WriteTimeout: 5 * time.Second,
+	}
+	defer kafkaWriter.Close()
+
 	followRepo := pgRepo.NewFollowRepository(db)
-	followSvc := service.NewFollowService(followRepo, log)
+	followSvc := service.NewFollowService(followRepo, kafkaWriter, log)
 
 	router := handler.NewRouter(followSvc, log)
 
